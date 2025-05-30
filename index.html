@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Game Engine - 在线游戏开发平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .resizable-x {
+            resize: horizontal;
+            overflow: auto;
+            min-width: 200px;
+            max-width: 400px;
+        }
+        
+        .resizable-y {
+            resize: vertical;
+            overflow: auto;
+            min-height: 150px;
+            max-height: 300px;
+        }
+        
+        #game-viewport {
+            background: repeating-linear-gradient(
+                45deg,
+                #2d3748,
+                #2d3748 10px,
+                #1a202c 10px,
+                #1a202c 20px
+            );
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .draggable-object {
+            position: absolute;
+            cursor: move;
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            background-color: rgba(74, 85, 104, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            user-select: none;
+        }
+        
+        .draggable-object.selected {
+            border: 2px solid #4299e1;
+            background-color: rgba(66, 153, 225, 0.3);
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #2d3748;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #4a5568;
+            border-radius: 4px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #718096;
+        }
+        
+        .grid-guide {
+            background-image: linear-gradient(#4a5568 1px, transparent 1px),
+                              linear-gradient(90deg, #4a5568 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        
+        .ai-generator-panel {
+            transition: all 0.3s ease;
+            max-height: 0;
+            overflow: hidden;
+        }
+        
+        .ai-generator-panel.open {
+            max-height: 500px;
+        }
+        
+        .ai-loading {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .ai-loading::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            animation: loading 1.5s infinite;
+        }
+        
+        @keyframes loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        .ai-preview {
+            transition: all 0.3s ease;
+            opacity: 0;
+            height: 0;
+        }
+        
+        .ai-preview.show {
+            opacity: 1;
+            height: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 h-screen flex flex-col overflow-hidden">
+    <!-- 顶部工具栏 -->
+    <header class="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+            <h1 class="text-xl font-bold text-blue-400 flex items-center">
+                <i class="fas fa-gamepad mr-2"></i>
+                Nexus Game Engine
+            </h1>
+            
+            <div class="flex space-x-2">
+                <button class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm flex items-center">
+                    <i class="fas fa-play mr-1"></i> 运行
+                </button>
+                <button class="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center">
+                    <i class="fas fa-save mr-1"></i> 保存
+                </button>
+                <button class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center">
+                    <i class="fas fa-share mr-1"></i> 导出
+                </button>
+            </div>
+        </div>
+        
+        <div class="flex items-center space-x-4">
+            <div class="relative">
+                <input type="text" placeholder="搜索资源或对象..." 
+                       class="bg-gray-700 border border-gray-600 rounded pl-8 pr-3 py-1 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <i class="fas fa-search absolute left-2 top-2 text-gray-400"></i>
+            </div>
+            
+            <button class="text-gray-300 hover:text-white">
+                <i class="fas fa-cog"></i>
+            </button>
+            
+            <div class="flex items-center space-x-2">
+                <div class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                    U
+                </div>
+                <span class="text-sm">开发者</span>
+            </div>
+        </div>
+    </header>
+    
+    <!-- 主内容区 -->
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 左侧面板 - 资源管理器 -->
+        <div class="resizable-x bg-gray-800 border-r border-gray-700 flex flex-col w-64">
+            <div class="px-3 py-2 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="font-semibold text-sm uppercase tracking-wider text-gray-400">
+                    <i class="fas fa-folder-open mr-2"></i> 资源管理器
+                </h2>
+                <button class="text-gray-400 hover:text-white">
+                    <i class="fas fa-ellipsis-v"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
+                <!-- AI创作资源模块 -->
+                <div class="mb-4">
+                    <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer" id="ai-generator-toggle">
+                        <span class="text-sm font-medium flex items-center">
+                            <i class="fas fa-robot mr-2 text-purple-400"></i>
+                            AI资源生成
+                        </span>
+                        <i class="fas fa-chevron-down text-xs transform transition-transform duration-200"></i>
+                    </div>
+                    
+                    <div class="ai-generator-panel bg-gray-900 rounded mt-1 p-2" id="ai-generator-panel">
+                        <div class="mb-3">
+                            <label class="block text-xs text-gray-400 mb-1">生成类型</label>
+                            <select class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" id="ai-gen-type">
+                                <option value="sprite">精灵图</option>
+                                <option value="background">游戏背景</option>
+                                <option value="character">游戏角色</option>
+                                <option value="tile">瓦片地图</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="block text-xs text-gray-400 mb-1">风格</label>
+                            <select class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" id="ai-gen-style">
+                                <option value="pixel">像素风格</option>
+                                <option value="cartoon">卡通风格</option>
+                                <option value="realistic">写实风格</option>
+                                <option value="lowpoly">低多边形</option>
+                                <option value="anime">动漫风格</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="block text-xs text-gray-400 mb-1">提示词</label>
+                            <textarea class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs h-16 focus:outline-none focus:ring-1 focus:ring-blue-500" 
+                                      placeholder="描述你想要生成的资源..." id="ai-prompt"></textarea>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="block text-xs text-gray-400 mb-1">API选择</label>
+                            <select class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" id="ai-api">
+                                <option value="openai">OpenAI DALL-E</option>
+                                <option value="stability">Stability AI</option>
+                                <option value="midjourney">Midjourney</option>
+                                <option value="local">本地模型</option>
+                            </select>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <button class="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm flex items-center" id="ai-generate-btn">
+                                <i class="fas fa-magic mr-1"></i> 生成
+                            </button>
+                            
+                            <div class="flex items-center space-x-2">
+                                <label class="text-xs text-gray-400">高级</label>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" value="" class="sr-only peer" id="ai-advanced-toggle">
+                                    <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- 高级选项 -->
+                        <div class="mt-3 hidden" id="ai-advanced-options">
+                            <div class="grid grid-cols-2 gap-2 mb-2">
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">宽</label>
+                                    <input type="number" value="512" min="64" max="1024" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">高</label>
+                                    <input type="number" value="512" min="64" max="1024" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                            </div>
+                            
+                            <div class="mb-2">
+                                <label class="block text-xs text-gray-400 mb-1">参考图</label>
+                                <div class="border border-dashed border-gray-600 rounded p-2 text-center cursor-pointer hover:bg-gray-700">
+                                    <i class="fas fa-image text-gray-500 mb-1"></i>
+                                    <p class="text-xs text-gray-400">点击上传参考图</p>
+                                    <input type="file" class="hidden" id="ai-reference-image">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">模型参数</label>
+                                <input type="range" min="0" max="100" value="70" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            </div>
+                        </div>
+                        
+                        <!-- 生成结果预览 -->
+                        <div class="mt-3 ai-preview" id="ai-preview">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-xs font-medium">生成结果</span>
+                                <div class="flex space-x-1">
+                                    <button class="text-xs text-gray-400 hover:text-white">
+                                        <i class="fas fa-redo"></i>
+                                    </button>
+                                    <button class="text-xs text-gray-400 hover:text-white">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                    <button class="text-xs text-gray-400 hover:text-white">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="bg-gray-700 rounded p-1 cursor-pointer hover:bg-gray-600">
+                                    <div class="bg-gradient-to-br from-purple-500 to-blue-500 h-20 rounded flex items-center justify-center">
+                                        <i class="fas fa-image text-xl text-white opacity-70"></i>
+                                    </div>
+                                    <p class="text-xs truncate text-center mt-1">选项1</p>
+                                </div>
+                                <div class="bg-gray-700 rounded p-1 cursor-pointer hover:bg-gray-600">
+                                    <div class="bg-gradient-to-br from-green-500 to-teal-500 h-20 rounded flex items-center justify-center">
+                                        <i class="fas fa-image text-xl text-white opacity-70"></i>
+                                    </div>
+                                    <p class="text-xs truncate text-center mt-1">选项2</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer">
+                        <span class="text-sm font-medium flex items-center">
+                            <i class="fas fa-chevron-down mr-1 text-xs"></i>
+                            场景
+                        </span>
+                        <button class="text-xs text-gray-400 hover:text-white">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="ml-4 mt-1 space-y-1">
+                        <div class="flex items-center px-2 py-1 text-sm rounded hover:bg-gray-700 cursor-pointer">
+                            <i class="fas fa-map mr-2 text-yellow-400"></i>
+                            主场景
+                        </div>
+                        <div class="flex items-center px-2 py-1 text-sm rounded hover:bg-gray-700 cursor-pointer">
+                            <i class="fas fa-map mr-2 text-blue-400"></i>
+                            菜单场景
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer">
+                        <span class="text-sm font-medium flex items-center">
+                            <i class="fas fa-chevron-down mr-1 text-xs"></i>
+                            精灵图
+                        </span>
+                        <button class="text-xs text-gray-400 hover:text-white">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="ml-4 mt-1 grid grid-cols-3 gap-2">
+                        <div class="bg-gray-700 rounded p-1 cursor-pointer hover:bg-gray-600">
+                            <div class="bg-blue-500 h-12 rounded flex items-center justify-center">
+                                <i class="fas fa-user"></i>
+                            </div>
+                            <p class="text-xs truncate text-center mt-1">玩家</p>
+                        </div>
+                        <div class="bg-gray-700 rounded p-1 cursor-pointer hover:bg-gray-600">
+                            <div class="bg-red-500 h-12 rounded flex items-center justify-center">
+                                <i class="fas fa-skull"></i>
+                            </div>
+                            <p class="text-xs truncate text-center mt-1">敌人</p>
+                        </div>
+                        <div class="bg-gray-700 rounded p-1 cursor-pointer hover:bg-gray-600">
+                            <div class="bg-green-500 h-12 rounded flex items-center justify-center">
+                                <i class="fas fa-coins"></i>
+                            </div>
+                            <p class="text-xs truncate text-center mt-1">金币</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer">
+                        <span class="text-sm font-medium flex items-center">
+                            <i class="fas fa-chevron-down mr-1 text-xs"></i>
+                            音效
+                        </span>
+                        <button class="text-xs text-gray-400 hover:text-white">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="ml-4 mt-1 space-y-1">
+                        <div class="flex items-center px-2 py-1 text-sm rounded hover:bg-gray-700 cursor-pointer">
+                            <i class="fas fa-volume-up mr-2 text-purple-400"></i>
+                            背景音乐
+                        </div>
+                        <div class="flex items-center px-2 py-1 text-sm rounded hover:bg-gray-700 cursor-pointer">
+                            <i class="fas fa-bell mr-2 text-purple-400"></i>
+                            音效1
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 中间区域 - 游戏视口和层级 -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- 游戏视口工具栏 -->
+            <div class="bg-gray-800 border-b border-gray-700 px-3 py-2 flex items-center justify-between">
+                <div class="flex space-x-2">
+                    <button class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center">
+                        <i class="fas fa-mouse-pointer mr-1"></i> 选择
+                    </button>
+                    <button class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center">
+                        <i class="fas fa-vector-square mr-1"></i> 矩形
+                    </button>
+                    <button class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center">
+                        <i class="fas fa-circle mr-1"></i> 圆形
+                    </button>
+                    <button class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center">
+                        <i class="fas fa-font mr-1"></i> 文本
+                    </button>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs text-gray-400">缩放:</span>
+                        <select class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs focus:outline-none">
+                            <option>100%</option>
+                            <option>75%</option>
+                            <option>50%</option>
+                            <option>25%</option>
+                        </select>
+                    </div>
+                    
+                    <div class="flex items-center space-x-2">
+                        <button class="text-gray-400 hover:text-white">
+                            <i class="fas fa-border-none"></i>
+                        </button>
+                        <button class="text-blue-400 hover:text-blue-300">
+                            <i class="fas fa-ruler"></i>
+                        </button>
+                        <button class="text-gray-400 hover:text-white">
+                            <i class="fas fa-lightbulb"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 游戏视口 -->
+            <div id="game-viewport" class="flex-1 relative grid-guide overflow-auto">
+                <!-- 这里放置可拖动的游戏对象 -->
+                <div class="draggable-object selected" style="left: 100px; top: 80px; width: 80px; height: 80px;">
+                    玩家
+                </div>
+                <div class="draggable-object" style="left: 250px; top: 120px; width: 60px; height: 60px;">
+                    敌人
+                </div>
+                <div class="draggable-object" style="left: 180px; top: 200px; width: 40px; height: 40px;">
+                    金币
+                </div>
+                <div class="draggable-object" style="left: 300px; top: 80px; width: 120px; height: 40px;">
+                    平台
+                </div>
+            </div>
+            
+            <!-- 层级和动画面板 -->
+            <div class="resizable-y bg-gray-800 border-t border-gray-700 h-48">
+                <div class="flex border-b border-gray-700">
+                    <button class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-blue-500 text-blue-400" data-tab="layers">
+                        <i class="fas fa-layer-group mr-1"></i> 层级
+                    </button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium text-gray-400 hover:text-white" data-tab="animation">
+                        <i class="fas fa-film mr-1"></i> 动画
+                    </button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium text-gray-400 hover:text-white" data-tab="console">
+                        <i class="fas fa-terminal mr-1"></i> 控制台
+                    </button>
+                </div>
+                
+                <div class="tab-content active p-2 h-full overflow-auto custom-scrollbar" id="layers-tab">
+                    <div class="space-y-1">
+                        <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer">
+                            <div class="flex items-center">
+                                <i class="fas fa-eye text-green-400 mr-2"></i>
+                                <span class="text-sm">玩家</span>
+                            </div>
+                            <i class="fas fa-lock text-gray-500"></i>
+                        </div>
+                        <div class="flex items-center justify-between px-2 py-1 bg-blue-900 rounded cursor-pointer">
+                            <div class="flex items-center">
+                                <i class="fas fa-eye text-green-400 mr-2"></i>
+                                <span class="text-sm">敌人</span>
+                            </div>
+                            <i class="fas fa-unlock text-gray-300"></i>
+                        </div>
+                        <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer">
+                            <div class="flex items-center">
+                                <i class="fas fa-eye text-green-400 mr-2"></i>
+                                <span class="text-sm">金币</span>
+                            </div>
+                            <i class="fas fa-unlock text-gray-300"></i>
+                        </div>
+                        <div class="flex items-center justify-between px-2 py-1 bg-gray-700 rounded cursor-pointer">
+                            <div class="flex items-center">
+                                <i class="fas fa-eye text-green-400 mr-2"></i>
+                                <span class="text-sm">平台</span>
+                            </div>
+                            <i class="fas fa-unlock text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tab-content p-2 h-full overflow-auto custom-scrollbar" id="animation-tab">
+                    <div class="text-center text-gray-500 py-8">
+                        <i class="fas fa-film text-3xl mb-2"></i>
+                        <p>没有动画数据</p>
+                        <button class="mt-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm">
+                            添加动画
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="tab-content p-2 h-full overflow-auto custom-scrollbar" id="console-tab">
+                    <div class="text-xs font-mono space-y-1">
+                        <div class="text-green-400">> 场景已加载</div>
+                        <div class="text-yellow-400">> 警告: 未设置碰撞体</div>
+                        <div class="text-gray-400">> 初始化完成</div>
+                        <div class="text-blue-400">> AI资源生成器已就绪</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 右侧面板 - 属性和组件 -->
+        <div class="resizable-x bg-gray-800 border-l border-gray-700 flex flex-col w-64">
+            <div class="px-3 py-2 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="font-semibold text-sm uppercase tracking-wider text-gray-400">
+                    <i class="fas fa-sliders-h mr-2"></i> 属性
+                </h2>
+                <button class="text-gray-400 hover:text-white">
+                    <i class="fas fa-ellipsis-v"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-3">
+                <div class="mb-4">
+                    <h3 class="text-sm font-medium mb-2 flex items-center justify-between">
+                        <span>变换</span>
+                        <i class="fas fa-chevron-down text-xs"></i>
+                    </h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">位置</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="relative">
+                                    <span class="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">X</span>
+                                    <input type="number" value="100" 
+                                           class="bg-gray-700 border border-gray-600 rounded pl-6 pr-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                                <div class="relative">
+                                    <span class="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">Y</span>
+                                    <input type="number" value="80" 
+                                           class="bg-gray-700 border border-gray-600 rounded pl-6 pr-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">大小</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="relative">
+                                    <span class="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">宽</span>
+                                    <input type="number" value="80" 
+                                           class="bg-gray-700 border border-gray-600 rounded pl-6 pr-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                                <div class="relative">
+                                    <span class="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-400">高</span>
+                                    <input type="number" value="80" 
+                                           class="bg-gray-700 border border-gray-600 rounded pl-6 pr-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">旋转</label>
+                            <input type="number" value="0" 
+                                   class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h3 class="text-sm font-medium mb-2 flex items-center justify-between">
+                        <span>精灵渲染器</span>
+                        <i class="fas fa-chevron-down text-xs"></i>
+                    </h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">精灵图</label>
+                            <div class="bg-gray-700 border border-gray-600 rounded p-1 flex items-center justify-between cursor-pointer">
+                                <div class="flex items-center">
+                                    <div class="bg-blue-500 w-6 h-6 rounded mr-2 flex items-center justify-center">
+                                        <i class="fas fa-user text-xs"></i>
+                                    </div>
+                                    <span class="text-xs">player_sprite</span>
+                                </div>
+                                <i class="fas fa-chevron-down text-xs text-gray-400"></i>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">颜色</label>
+                            <div class="flex items-center">
+                                <div class="w-6 h-6 rounded-full bg-blue-500 border border-gray-600 mr-2"></div>
+                                <span class="text-xs">#3B82F6</span>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-gray-400 mb-1">透明度</label>
+                            <input type="range" min="0" max="100" value="100" 
+                                   class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h3 class="text-sm font-medium mb-2 flex items-center justify-between">
+                        <span>碰撞体</span>
+                        <i class="fas fa-chevron-down text-xs"></i>
+                    </h3>
+                    <div class="text-xs text-gray-500 italic">无碰撞体组件</div>
+                    <button class="mt-2 w-full px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">
+                        <i class="fas fa-plus mr-1"></i> 添加碰撞体
+                    </button>
+                </div>
+                
+                <div>
+                    <button class="w-full px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs flex items-center justify-center">
+                        <i class="fas fa-plus mr-1"></i> 添加组件
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 底部状态栏 -->
+    <footer class="bg-gray-800 border-t border-gray-700 px-4 py-1 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-4">
+            <span class="text-green-400 flex items-center">
+                <i class="fas fa-circle mr-1"></i> 已连接
+            </span>
+            <span>场景: 主场景</span>
+            <span>选择: 玩家</span>
+        </div>
+        
+        <div class="flex items-center space-x-4">
+            <span>FPS: 60</span>
+            <span>内存: 128MB</span>
+            <span>版本: v1.0.0-beta</span>
+        </div>
+    </footer>
+
+    <script>
+        // 标签页切换
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // 移除所有活动标签和内容
+                document.querySelectorAll('.tab-btn').forEach(b => {
+                    b.classList.remove('border-b-2', 'border-blue-500', 'text-blue-400');
+                    b.classList.add('text-gray-400');
+                });
+                
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                // 激活当前标签
+                btn.classList.add('border-b-2', 'border-blue-500', 'text-blue-400');
+                btn.classList.remove('text-gray-400');
+                
+                const tabId = btn.getAttribute('data-tab') + '-tab';
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+        
+        // 游戏对象选择
+        document.querySelectorAll('.draggable-object').forEach(obj => {
+            obj.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
+                // 移除所有选中状态
+                document.querySelectorAll('.draggable-object').forEach(o => {
+                    o.classList.remove('selected');
+                });
+                
+                // 设置当前对象为选中状态
+                obj.classList.add('selected');
+            });
+        });
+        
+        // 游戏视口点击
+        document.getElementById('game-viewport').addEventListener('click', () => {
+            // 点击空白处取消所有选择
+            document.querySelectorAll('.draggable-object').forEach(o => {
+                o.classList.remove('selected');
+            });
+        });
+        
+        // 实现简单的拖拽功能
+        let isDragging = false;
+        let currentDragged = null;
+        let offsetX, offsetY;
+        
+        document.querySelectorAll('.draggable-object').forEach(obj => {
+            obj.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // 只处理左键
+                
+                isDragging = true;
+                currentDragged = obj;
+                
+                // 计算鼠标在元素内的偏移
+                const rect = obj.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+                
+                // 设置z-index使被拖动的元素在最上层
+                obj.style.zIndex = '100';
+                
+                e.preventDefault();
+            });
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging || !currentDragged) return;
+            
+            const viewport = document.getElementById('game-viewport');
+            const viewportRect = viewport.getBoundingClientRect();
+            
+            // 计算新位置，限制在视口内
+            let newX = e.clientX - viewportRect.left - offsetX;
+            let newY = e.clientY - viewportRect.top - offsetY;
+            
+            // 边界检查
+            newX = Math.max(0, Math.min(newX, viewportRect.width - currentDragged.offsetWidth));
+            newY = Math.max(0, Math.min(newY, viewportRect.height - currentDragged.offsetHeight));
+            
+            currentDragged.style.left = `${newX}px`;
+            currentDragged.style.top = `${newY}px`;
+            
+            // 更新属性面板中的位置值
+            const xInput = document.querySelector('input[placeholder="X"]');
+            const yInput = document.querySelector('input[placeholder="Y"]');
+            if (xInput && yInput) {
+                xInput.value = Math.round(newX);
+                yInput.value = Math.round(newY);
+            }
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isDragging && currentDragged) {
+                currentDragged.style.zIndex = '';
+            }
+            isDragging = false;
+            currentDragged = null;
+        });
+        
+        // 属性面板输入同步
+        document.querySelectorAll('input[type="number"]').forEach(input => {
+            input.addEventListener('change', () => {
+                const selected = document.querySelector('.draggable-object.selected');
+                if (!selected) return;
+                
+                if (input.placeholder === 'X' || input.placeholder === 'Y') {
+                    const xInput = document.querySelector('input[placeholder="X"]');
+                    const yInput = document.querySelector('input[placeholder="Y"]');
+                    
+                    if (xInput && yInput) {
+                        selected.style.left = `${xInput.value}px`;
+                        selected.style.top = `${yInput.value}px`;
+                    }
+                } else if (input.placeholder === '宽' || input.placeholder === '高') {
+                    const widthInput = document.querySelector('input[placeholder="宽"]');
+                    const heightInput = document.querySelector('input[placeholder="高"]');
+                    
+                    if (widthInput && heightInput) {
+                        selected.style.width = `${widthInput.value}px`;
+                        selected.style.height = `${heightInput.value}px`;
+                    }
+                }
+            });
+        });
+        
+        // AI资源生成器功能
+        const aiGeneratorToggle = document.getElementById('ai-generator-toggle');
+        const aiGeneratorPanel = document.getElementById('ai-generator-panel');
+        const aiAdvancedToggle = document.getElementById('ai-advanced-toggle');
+        const aiAdvancedOptions = document.getElementById('ai-advanced-options');
+        const aiGenerateBtn = document.getElementById('ai-generate-btn');
+        const aiPreview = document.getElementById('ai-preview');
+        
+        // 切换AI生成器面板
+        aiGeneratorToggle.addEventListener('click', () => {
+            aiGeneratorPanel.classList.toggle('open');
+            const icon = aiGeneratorToggle.querySelector('i');
+            icon.classList.toggle('rotate-180');
+        });
+        
+        // 切换高级选项
+        aiAdvancedToggle.addEventListener('change', () => {
+            aiAdvancedOptions.classList.toggle('hidden');
+        });
+        
+        // 模拟AI生成过程
+        aiGenerateBtn.addEventListener('click', () => {
+            const prompt = document.getElementById('ai-prompt').value;
+            if (!prompt) {
+                alert('请输入提示词');
+                return;
+            }
+            
+            // 显示加载状态
+            aiGenerateBtn.disabled = true;
+            aiGenerateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> 生成中...';
+            
+            // 模拟API调用延迟
+            setTimeout(() => {
+                // 恢复按钮状态
+                aiGenerateBtn.disabled = false;
+                aiGenerateBtn.innerHTML = '<i class="fas fa-magic mr-1"></i> 生成';
+                
+                // 显示预览
+                aiPreview.classList.add('show');
+                
+                // 在控制台添加日志
+                const consoleTab = document.getElementById('console-tab');
+                const logEntry = document.createElement('div');
+                logEntry.className = 'text-purple-400';
+                logEntry.textContent = `> AI生成完成: ${prompt}`;
+                consoleTab.appendChild(logEntry);
+                consoleTab.scrollTop = consoleTab.scrollHeight;
+                
+            }, 2000);
+        });
+        
+        // 初始化AI生成器面板
+        aiGeneratorPanel.classList.add('open');
+    </script>
+</body>
+</html>
